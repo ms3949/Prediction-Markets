@@ -240,5 +240,5 @@ Key findings applied in this app:
 
 | Name | Role |
 |---|---|
-| Masaab Sohaib | Prompt Engineer · Agent Orchestration · Frontend · Deployment |
-| Danny Atik | Backend · API Integration · System Architecture |
+| Masaab | Prompt Engineer · Agent Orchestration · Frontend · Deployment |
+| Danny | Backend · API Integration · System Architecture |
