@@ -42,9 +42,31 @@ def search_knowledge_base(query: str, top_n: int = 3, category: str = None) -> l
     if not keywords:
         return []
 
+    if not os.path.exists(DB_PATH):
+        try:
+            from build_kb import build
+            build()
+        except ImportError:
+            return []
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
+
+    # Verify table exists
+    try:
+        cur.execute("SELECT 1 FROM documents LIMIT 1")
+    except sqlite3.OperationalError:
+        # Table missing, try building
+        conn.close()
+        try:
+            from build_kb import build
+            build()
+        except ImportError:
+            return []
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
 
     # Relevance score: count keyword hits + category boost
     score_cases = " + ".join(
