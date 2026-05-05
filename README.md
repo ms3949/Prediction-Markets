@@ -1,6 +1,6 @@
 # 📊 Prediction Markets Research Assistant
 
-A live AI-powered research platform that connects to Kalshi and Polymarket, deploys a 3-agent pipeline to classify and analyze cross-exchange markets, and recommends specific trades grounded in academic literature.
+A live AI-powered research platform that connects to Kalshi and Polymarket, deploys a multi-agent pipeline to classify, match, and analyze cross-exchange markets, and recommends specific trades grounded in academic literature.
 
 **Live App**: [prediction-markets-app.streamlit.app](https://prediction-markets-app.streamlit.app)
 
@@ -12,7 +12,7 @@ Prediction markets on Kalshi and Polymarket attract structurally different user 
 
 This app surfaces those spreads, classifies them by sector, evaluates their exploitability using fee structures and efficiency theory from Wolfers & Zitzewitz (2006), and recommends the single best trade available in the current session.
 
-One button. Three agents. Under 60 seconds.
+One button. Five agents. Under 60 seconds.
 
 ---
 
@@ -25,23 +25,35 @@ Kalshi V2 API          Polymarket Gamma API
                 ▼
         ┌───────────────┐
         │  Agent 1      │  Collector
-        │               │  Sort by volume, select top 20 each platform
+        │               │  Sort by volume, select top 200 each platform
         └──────┬────────┘
                │  titles + volume stats
                ▼
         ┌───────────────┐
-        │  Agent 2      │  Classifier  ←── RAG: sector keywords
+        │  Agent 2      │  Classifier
         │               │  GPT-4o-mini classifies each title into sector
-        └──────┬────────┘  Token overlap matching finds cross-platform pairs
+        └──────┬────────┘
+               │
+               ▼
+        ┌───────────────┐
+        │  Agent 3      │  Matcher
+        │               │  Cross-references platforms to find same-event pairs
+        └──────┬────────┘
+               │  (If 0 matches found)
+               ▼
+        ┌───────────────┐
+        │  Agent 5      │  Closest Matcher (Fallback)
+        │               │  Finds correlated/closest pairs when exact matches fail
+        └──────┬────────┘
                │
         ┌──────┴──────────────────────────────────┐
         ▼       ▼        ▼        ▼        ▼       ▼
      Sports  Politics  Finance  Crypto  World   Other
         └──────┬──────────────────────────────────┘
-               │  all sectors + matched pairs
+               │  all sectors + matched/closest pairs
                ▼
         ┌───────────────┐
-        │  Agent 3      │  Strategist  ←── RAG: 5 docs (Wolfers & Zitzewitz
+        │  Agent 4      │  Strategist  ←── RAG: 5 docs (Wolfers & Zitzewitz
         │               │  Academic-grounded verdict per sector              + fees + liquidity)
         └──────┬────────┘
                │  best sector + verdict cards
@@ -50,13 +62,24 @@ Kalshi V2 API          Polymarket Gamma API
                │
                ▼
         ┌───────────────┐
-        │  Agent 3b     │  Drilldown  ←── RAG: 3 docs
-        │               │  score_spread() tool call per pair  ←── Tool calling
+        │  Agent 4b     │  Drilldown  ←── RAG: 3 docs
+        │               │  Finds best trade/arbitrage from verified pairs
         └──────┬────────┘
                │
                ▼
         #1 trade recommendation + runner-up + matched pairs table
 ```
+
+---
+
+### The Agents in Detail
+
+- **Agent 1: Collector** — Sorts markets by volume and retrieves the top 50 active titles from both Kalshi and Polymarket.
+- **Agent 2: Classifier** — Uses GPT-4o-mini to classify each title into a sector (Sports, Politics, Finance, Crypto, World, Other).
+- **Agent 3: Matcher** — Cross-references all 100 titles from both platforms simultaneously using full language understanding to find same-event pairs. It resolves abbreviations and different phrasings (e.g., "LAD" = "LA Dodgers", "Will Lakers win?" = "Lakers vs Celtics — Lakers win", "Trump approval > 50%" = "Trump job approval above fifty percent"). Returns verified pairs with a confidence rating (high/medium), explicitly excluding low-confidence matches to avoid false positives. It also filters invalid prices and recalculates spreads.
+- **Agent 5: Closest Matcher** — Acts as a fallback. If Agent 3 finds no exact matches, it attempts to pair the closest correlated contracts (e.g., similar games or related political events) across the platforms.
+- **Agent 4: Strategist** — Analyzes each sector's verified pairs using academic frameworks (Wolfers & Zitzewitz) to provide a sector-by-sector verdict.
+- **Agent 4b: Drilldown** — Finds the best specific trade in the user-selected sector, checking for fee exploitability and assessing the risks.
 
 ---
 
@@ -81,7 +104,7 @@ Retrieval: `retrieve(query, top_n, category)` — keyword match with category bo
 
 ## Tool Calling
 
-`score_spread()` is called by Agent 3b for each matched pair in the selected sector.
+`score_spread()` is called by Agent 4b (Drilldown) for each matched pair in the selected sector.
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -99,10 +122,10 @@ Returns: `exploitability_score` (1–20), `spread_size_score` (1–5), `liquidit
 ```
 prediction-markets/
 ├── app.py              # Single-page Streamlit UI
-├── agents.py           # 3-agent pipeline + score_spread() tool
+├── agents.py           # 5-agent pipeline (Collector, Classifier, Matcher, Strategist, Drilldown, +Closest Matcher)
 ├── rag.py              # SQLite keyword search RAG
 ├── data_fetcher.py     # Kalshi V2 + Polymarket Gamma API fetchers
-├── matcher.py          # Token-based cross-platform market matching
+├── matcher.py          # Legacy/utility cross-platform matching
 ├── build_kb.py         # One-time script to build knowledge_base.db
 ├── knowledge_base.db   # SQLite RAG database (17 documents)
 ├── requirements.txt    # Python dependencies
@@ -169,7 +192,7 @@ Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ### 6. Use the app
 
-1. Click **▶ Run Full Analysis** — fetches live markets and runs all 3 agents (20–40 seconds)
+1. Click **▶ Run Full Analysis** — fetches live markets and runs the full agent pipeline (30–60 seconds)
 2. Review the volume metrics (top left) and sector breakdown chart (top right)
 3. Read the session verdict and sector verdict cards
 4. Select a sector from the dropdown — it pre-selects the best sector automatically

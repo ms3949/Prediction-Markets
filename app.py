@@ -104,22 +104,89 @@ st.markdown("""
                   border:1px solid #21262d; color:#7d8590; }
     .a-run { border-color:#f39c12; color:#f39c12; background:#f39c1208; }
     .a-done{ border-color:#00d4aa44; color:#00d4aa; background:#00d4aa08; }
+
+    /* Welcome modal overlay */
+    .modal-overlay {
+        position:fixed; top:0; left:0; width:100vw; height:100vh;
+        background:rgba(0,0,0,0.75); z-index:9999;
+        display:flex; align-items:center; justify-content:center;
+    }
+    .modal-box {
+        background:#161b27; border:1px solid #21262d; border-radius:16px;
+        padding:36px 40px; max-width:560px; width:90%;
+        box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+        text-align:center;
+    }
+    .modal-icon { font-size:3rem; margin-bottom:16px; }
+    .modal-title { color:#00d4aa; font-size:1.5rem; font-weight:700; margin-bottom:12px; }
+    .modal-body { color:#9198a1; font-size:0.88rem; line-height:1.7; margin-bottom:24px; }
+    .modal-body strong { color:#e0e0e0; }
+    .modal-pills { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-bottom:24px; }
+    .modal-pill { background:#00d4aa11; border:1px solid #00d4aa33; border-radius:20px;
+                  padding:4px 14px; font-size:0.75rem; color:#00d4aa; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Session State ─────────────────────────────────────────────────────────────
 
 for k, v in {
-    "pipeline":       None,
-    "pipeline_hash":  None,
-    "drilldown":      None,
-    "drill_sector":   None,
-    "run_timestamp":  None,
-    "run_duration":   None,
-    "qc_results":     None,
+    "pipeline":         None,
+    "pipeline_hash":    None,
+    "drilldown":        None,
+    "drill_sector":     None,
+    "run_timestamp":    None,
+    "run_duration":     None,
+    "qc_results":       None,
+    "welcome_shown":    False,
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# ── Welcome Modal ────────────────────────────────────────────────────────────
+
+@st.dialog("Welcome to the Prediction Markets Research Assistant")
+def show_welcome():
+    st.markdown("""
+    <div style="text-align:center; padding: 8px 0 16px 0;">
+        <div style="font-size:2.8rem; margin-bottom:12px;">📊</div>
+        <div style="color:#00d4aa; font-size:1.2rem; font-weight:700; margin-bottom:14px;">
+            Where markets disagree — and whether that gap is worth trading
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    Discover where **Kalshi** and **Polymarket** price the same event differently.
+    Our AI pipeline fetches live markets from both platforms, classifies them by sector,
+    and surfaces the best cross-platform pricing opportunities — grounded in research
+    from **Wolfers & Zitzewitz (2006)**.
+
+    *From raw market data to a trade recommendation in under 60 seconds.*
+    """)
+
+    st.markdown("""
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin:16px 0;">
+        <span style="background:#00d4aa11;border:1px solid #00d4aa33;border-radius:20px;
+                     padding:4px 14px;font-size:0.8rem;color:#00d4aa;">🏀 Sports</span>
+        <span style="background:#00d4aa11;border:1px solid #00d4aa33;border-radius:20px;
+                     padding:4px 14px;font-size:0.8rem;color:#00d4aa;">🗳️ Politics</span>
+        <span style="background:#00d4aa11;border:1px solid #00d4aa33;border-radius:20px;
+                     padding:4px 14px;font-size:0.8rem;color:#00d4aa;">📈 Finance</span>
+        <span style="background:#00d4aa11;border:1px solid #00d4aa33;border-radius:20px;
+                     padding:4px 14px;font-size:0.8rem;color:#00d4aa;">₿ Crypto</span>
+        <span style="background:#00d4aa11;border:1px solid #00d4aa33;border-radius:20px;
+                     padding:4px 14px;font-size:0.8rem;color:#00d4aa;">🌍 World</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    if st.button("🚀 Let's Go", type="primary", use_container_width=True):
+        st.session_state.welcome_shown = True
+        st.rerun()
+
+if not st.session_state.welcome_shown:
+    show_welcome()
+    st.stop()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -150,12 +217,13 @@ def run_qc(pipeline: dict) -> dict:
     Returns QC report with pass/warn/fail for each check.
     """
     classifier = pipeline.get("classifier") or {}
+    matcher    = pipeline.get("matcher")    or {}
     strategist = pipeline.get("strategist") or {}
-    sectors    = classifier.get("sectors") or {}
+    sectors    = matcher.get("sectors") or classifier.get("by_sector") or {}
 
     checks = []
     total_markets = classifier.get("total_markets", 0)
-    total_pairs   = sum(len(v.get("matched_pairs",[])) for v in sectors.values())
+    total_pairs   = matcher.get("total_pairs", sum(len(v.get("matched_pairs",[])) for v in sectors.values()))
     total_sectors = len([s for s in sectors if sectors[s].get("kalshi") or sectors[s].get("polymarket")])
     has_analysis  = bool(strategist.get("sector_analysis"))
     has_narrative = bool(strategist.get("session_narrative"))
@@ -229,8 +297,9 @@ def run_qc(pipeline: dict) -> dict:
 pipeline   = st.session_state.pipeline or {}
 collector  = pipeline.get("collector")  or {}
 classifier = pipeline.get("classifier") or {}
+matcher    = pipeline.get("matcher")    or {}
 strategist = pipeline.get("strategist") or {}
-sectors    = classifier.get("sectors")  or {}
+sectors    = matcher.get("sectors")     or classifier.get("by_sector") or {}
 analysis   = strategist.get("sector_analysis") or {}
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -256,51 +325,68 @@ st.markdown("""
 vol_col, chart_col = st.columns([1, 1.6], gap="medium")
 
 with vol_col:
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="ptitle">📡 Live Platform Activity</div>', unsafe_allow_html=True)
-
     kv = fmt(collector.get("kalshi_total_volume"))
     pv = fmt(collector.get("polymarket_total_volume"))
     km = collector.get("kalshi_market_count", "—")
     pm = collector.get("polymarket_market_count", "—")
+    qc = st.session_state.qc_results
 
+    # Build each part as separate inline style strings — no CSS classes needed
+    # This avoids the f-string / CSS injection timing issue
+
+    ts_line = ""
     if st.session_state.run_timestamp:
         ts  = time.strftime("%H:%M:%S", time.localtime(st.session_state.run_timestamp))
         dur = st.session_state.run_duration or 0
-        st.caption(f"Last updated: {ts} · Analysis took {dur:.0f}s")
+        ts_line = f"Last updated: {ts} &nbsp;·&nbsp; took {dur:.0f}s"
 
-    st.markdown(f"""
-    <div class="vol-grid">
-        <div class="vol-box">
-            <div class="vol-val">{kv}</div>
-            <div class="vol-lbl">Kalshi Contracts</div>
-            <div class="vol-sub">{km} active markets</div>
-        </div>
-        <div class="vol-box">
-            <div class="vol-val">{pv}</div>
-            <div class="vol-lbl">Polymarket (USDC)</div>
-            <div class="vol-sub">{pm} active markets</div>
-        </div>
-    </div>""", unsafe_allow_html=True)
-
-    # QC score if available
-    qc = st.session_state.qc_results
+    qc_line = ""
     if qc:
-        score = qc["score"]
-        qc_cls = "qc-pass" if score >= 80 else ("qc-warn" if score >= 60 else "qc-fail")
-        st.markdown(f"""
-        <div style="margin-top:10px; display:flex; align-items:center; gap:8px;">
-            <span class="{qc_cls}">QC Score: {score}%</span>
-            <span style="font-size:0.72rem; color:#555">
-                {qc['total_markets']} markets · {qc['verified_pairs']} verified pairs
-            </span>
-        </div>""", unsafe_allow_html=True)
+        score   = qc["score"]
+        qc_color = "#00d4aa" if score >= 80 else ("#f39c12" if score >= 60 else "#e74c3c")
+        qc_line = (
+            f'<span style="background:{qc_color}22;color:{qc_color};border-radius:6px;' +
+            f'padding:2px 8px;font-size:0.72rem;font-weight:700;">QC {score}%</span>' +
+            f'<span style="font-size:0.72rem;color:#555;margin-left:6px;">' +
+            f'{qc["total_markets"]} markets · {qc["verified_pairs"]} verified pairs</span>'
+        )
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    BOX = (
+        "background:#0d1117;border:1px solid #21262d;border-radius:8px;"
+        "padding:12px 14px;text-align:center;flex:1;"
+    )
+    VAL = "font-size:1.4rem;font-weight:700;color:#00d4aa;"
+    LBL = "font-size:0.7rem;color:#7d8590;margin-top:2px;"
+    SUB = "font-size:0.72rem;color:#9198a1;margin-top:2px;"
+
+    st.markdown(
+        f'''<div style="background:#161b27;border:1px solid #21262d;border-radius:12px;padding:18px 20px;">
+<div style="color:#00d4aa;font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:12px;">📡 Live Platform Activity</div>
+{f'<p style="font-size:0.72rem;color:#555;margin:0 0 10px 0">{ts_line}</p>' if ts_line else ""}
+<div style="display:flex;gap:10px;margin-bottom:10px;">
+<div style="{BOX}">
+<div style="{VAL}">{kv}</div>
+<div style="{LBL}">Kalshi Contracts</div>
+<div style="{SUB}">{km} active markets</div>
+</div>
+<div style="{BOX}">
+<div style="{VAL}">{pv}</div>
+<div style="{LBL}">Polymarket (USDC)</div>
+<div style="{SUB}">{pm} active markets</div>
+</div>
+</div>
+{f'<div style="margin-top:6px;">{qc_line}</div>' if qc_line else ""}
+</div>''',
+        unsafe_allow_html=True
+    )
 
 with chart_col:
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="ptitle">📊 Active Markets by Sector</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:#161b27;border:1px solid #21262d;border-radius:12px;padding:18px 20px;">' +
+        '<div style="color:#00d4aa;font-size:0.75rem;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:0.6px;margin-bottom:12px;">📊 Active Markets by Sector</div>',
+        unsafe_allow_html=True
+    )
 
     if sectors:
         cats      = [s for s in ["sports","politics","finance","crypto","world","other"] if s in sectors]
@@ -352,14 +438,16 @@ with status_col:
         best = strategist.get("best_sector", "")
         total_mkts = classifier.get("total_markets", 0)
         dur = st.session_state.run_duration or 0
+        total_pairs = matcher.get("total_pairs", 0)
         st.caption(
             f"{total_mkts} markets classified · "
+            f"{total_pairs} same-event pairs · "
             f"Best: **{SECTOR_EMOJI.get(best,'')} {best.title()}** · "
             f"{strategist.get('overall_verdict','')} · "
-            f"Ran in {dur:.0f}s"
+            f"{dur:.0f}s"
         )
     elif not pipeline:
-        st.caption("Fetches top 200 markets from each platform and runs 3 AI agents. Takes ~30-45 seconds.")
+        st.caption("Fetches top 200 markets from each platform and runs 5 AI agents. Takes ~30-45 seconds.")
 
 if run_btn:
     prog_bar    = st.progress(0, text="Starting...")
@@ -369,7 +457,8 @@ if run_btn:
 
     def update(step, total, label):
         step_labels.append(label)
-        prog_bar.progress(int(step / total * 100), text=label)
+        pct = int(step / max(total, 4) * 100)
+        prog_bar.progress(pct, text=label)
         html = "".join(
             f'<div class="agent-step a-done">✅ {l}</div>' if i < len(step_labels) - 1
             else f'<div class="agent-step a-run">⏳ {l}</div>'
@@ -378,7 +467,7 @@ if run_btn:
         step_holder.markdown(html, unsafe_allow_html=True)
 
     try:
-        update(0, 3, "🔄 Fetching live markets from Kalshi and Polymarket...")
+        update(0, 5, "🔄 Fetching live markets from Kalshi and Polymarket...")
         k_raw, p_raw, _ = fetch_snapshot(category_filter="all", limit=200)
 
         def mkt_to_dict(m):
@@ -455,6 +544,7 @@ st.markdown(f"""
     <div class="b-title" style="color:{v_clr}">{v_emoji} Market Session: {verdict}</div>
     <div class="b-body">{narrative}</div>
     {f'<div class="b-body" style="margin-top:8px">🏆 <strong style="color:{v_clr}">Best sector right now: {SECTOR_EMOJI.get(best_sec,"")} {best_sec.title()}</strong> — {best_why}</div>' if best_sec else ''}
+    {f'<div class="b-body" style="margin-top:4px;font-size:0.75rem;color:#555">🔗 Matcher: {matcher.get("total_pairs",0)} verified same-event pairs · {matcher.get("matcher_notes","")[:100]}</div>' if matcher.get("total_pairs") else ''}
 </div>""", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -466,8 +556,12 @@ cards_col, drill_col = st.columns([1, 1], gap="medium")
 # ── LEFT: Sector verdict cards ────────────────────────────────────────────────
 
 with cards_col:
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="ptitle">🗂 Sector Verdicts</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:#161b27;border:1px solid #21262d;border-radius:12px;padding:18px 20px;">' +
+        '<div style="color:#00d4aa;font-size:0.75rem;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:0.6px;margin-bottom:12px;">🗂 Sector Verdicts</div>',
+        unsafe_allow_html=True
+    )
 
     sector_order     = ["sports","politics","finance","crypto","world","other"]
     available_sectors = [s for s in sector_order if s in analysis]
@@ -498,13 +592,15 @@ with cards_col:
                 <div class="sc-academic">📚 {card.get('academic_note','—')}</div>
             </div>""", unsafe_allow_html=True)
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
 # ── RIGHT: Sector selector + drilldown ───────────────────────────────────────
 
 with drill_col:
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="ptitle">🎯 Trade Finder</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:#161b27;border:1px solid #21262d;border-radius:12px;padding:18px 20px;">' +
+        '<div style="color:#00d4aa;font-size:0.75rem;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:0.6px;margin-bottom:12px;">🎯 Trade Finder</div>',
+        unsafe_allow_html=True
+    )
 
     if not available_sectors:
         st.info("No sectors available. Run the analysis first.")
@@ -621,8 +717,6 @@ with drill_col:
                     [{"Platform":"Polymarket", "Title":m["title"], "Mid":m.get("mid","—")} for m in sec_p]
                 )
                 st.dataframe(pd.DataFrame(all_mkts), hide_index=True, use_container_width=True, height=260)
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # QUALITY CONTROL PANEL (collapsed by default — for grader / advanced users)
