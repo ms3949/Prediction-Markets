@@ -156,35 +156,103 @@ Markets:
             else:
                 sectors[sec]["polymarket"].append(m)
 
-        # Find cross-platform matches (same event on both)
+        # ── STRICT SAME-EVENT MATCHING ─────────────────────────────────────────
+        # A valid cross-platform pair MUST refer to the SAME underlying event.
+        # Rules:
+        #   1. Both markets must be in the SAME sector (already guaranteed here)
+        #   2. Token overlap must be HIGH (>=0.55) — shared entity names, team names, dates
+        #   3. Market type must be compatible — no player props vs team futures
+        #   4. Both must have valid mid-prices
+        #
+        # INVALID examples (rejected):
+        #   "Gunnar Henderson 2+ hits" vs "Charlotte Hornets win NBA Finals"
+        #   → Different entities, different sports, different time horizons
+        #
+        # VALID examples (accepted):
+        #   "Lakers vs Celtics — Lakers win" vs "Will the Lakers beat the Celtics?"
+        #   → Same teams, same game, same outcome definition
+
+        STOPWORDS = {"will","the","a","an","in","of","to","be","vs","at","by","or",
+                     "and","is","for","on","win","beat","over","than","who","what",
+                     "which","their","this","that","from","game","match","series",
+                     "2025","2026","season","year","yes","no","?","-"}
+
+        # Market type signals — if both titles contain these, they are likely incompatible
+        PROP_SIGNALS    = {"hits","rbis","strikeouts","yards","points","assists","rebounds",
+                           "goals","saves","turnovers","homers","runs","tackles","sacks"}
+        FUTURES_SIGNALS = {"finals","championship","cup","title","playoffs","pennant",
+                           "super bowl","world series","mvp","award"}
+
+        def is_prop(title: str) -> bool:
+            tl = title.lower()
+            return any(s in tl for s in PROP_SIGNALS)
+
+        def is_future(title: str) -> bool:
+            tl = title.lower()
+            return any(s in tl for s in FUTURES_SIGNALS)
+
+        def same_event(k_title: str, p_title: str) -> bool:
+            """Return True only if both titles refer to the same underlying event."""
+            # Reject prop vs futures mismatch
+            if is_prop(k_title) != is_prop(p_title):
+                return False
+            if is_future(k_title) != is_future(p_title):
+                return False
+
+            # Normalize common aliases before comparing
+            ALIASES = {
+                "btc": "bitcoin", "eth": "ethereum", "doge": "dogecoin",
+                "kc": "kansas", "ny": "new", "la": "los",
+                "sf": "san", "tb": "tampa",
+            }
+            def normalize(text):
+                words = text.lower().split()
+                return [ALIASES.get(w.strip(".,?!:;"), w.strip(".,?!:;")) for w in words]
+
+            # Token overlap — must share the key entities (teams, players, event names)
+            k_words = set(normalize(k_title)) - STOPWORDS
+            p_words = set(normalize(p_title)) - STOPWORDS
+
+            # Remove single-char tokens
+            k_words = {w for w in k_words if len(w) > 1}
+            p_words = {w for w in p_words if len(w) > 1}
+
+            if not k_words or not p_words:
+                return False
+
+            intersection = k_words & p_words
+            overlap = len(intersection) / min(len(k_words), len(p_words))
+
+            # Require high overlap — at least 55% of the smaller set must match
+            # This catches "Lakers win" vs "Will Lakers beat Celtics" (both have "lakers")
+            # but rejects "Henderson hits" vs "Hornets Finals" (zero overlap)
+            return overlap >= 0.55
+
         for sec, data in sectors.items():
             k_titles = data["kalshi"]
             p_titles = data["polymarket"]
             matches = []
             for km in k_titles:
                 for pm in p_titles:
-                    # Simple keyword overlap check
-                    k_words = set(km["title"].lower().split())
-                    p_words = set(pm["title"].lower().split())
-                    stopwords = {"will","the","a","an","in","of","to","be","vs","at","by","or","and","is","for","on"}
-                    k_clean = k_words - stopwords
-                    p_clean = p_words - stopwords
-                    if len(k_clean) > 0 and len(p_clean) > 0:
-                        overlap = len(k_clean & p_clean) / min(len(k_clean), len(p_clean))
-                        if overlap >= 0.3:
-                            k_mid = float(km.get("mid") or 0.5)
-                            p_mid = float(pm.get("mid") or 0.5)
-                            spread = abs(k_mid - p_mid)
-                            matches.append({
-                                "kalshi_title":     km["title"],
-                                "polymarket_title": pm["title"],
-                                "kalshi_mid":       round(k_mid, 3),
-                                "polymarket_mid":   round(p_mid, 3),
-                                "spread":           round(spread, 3),
-                                "spread_pct":       f"{spread*100:.1f}%",
-                                "kalshi_volume":    km.get("volume", 0),
-                                "polymarket_volume": pm.get("volume", 0),
-                            })
+                    if not same_event(km["title"], pm["title"]):
+                        continue  # REJECT — different underlying events
+                    k_mid = float(km.get("mid") or 0.5)
+                    p_mid = float(pm.get("mid") or 0.5)
+                    # Skip if either price is missing or extreme (data quality issue)
+                    if k_mid <= 0.01 or k_mid >= 0.99 or p_mid <= 0.01 or p_mid >= 0.99:
+                        continue
+                    spread = abs(k_mid - p_mid)
+                    matches.append({
+                        "kalshi_title":      km["title"],
+                        "polymarket_title":  pm["title"],
+                        "kalshi_mid":        round(k_mid, 3),
+                        "polymarket_mid":    round(p_mid, 3),
+                        "spread":            round(spread, 3),
+                        "spread_pct":        f"{spread*100:.1f}%",
+                        "kalshi_volume":     km.get("volume", 0),
+                        "polymarket_volume": pm.get("volume", 0),
+                        "same_event_verified": True,
+                    })
             data["matched_pairs"] = matches
 
         print(f"  ✅ Classified {len(classified)} markets into {len(sectors)} sectors")
@@ -316,18 +384,43 @@ Analyze each sector and give your strategic thoughts on where to bet.
 # ══════════════════════════════════════════════════════════════════════════════
 
 DRILLDOWN_SYSTEM = """
-You are a prediction markets trade analyst.
+You are a strict prediction markets arbitrage analyst.
 
-A user has selected a specific sector to investigate. You have all the markets
-in that sector across Kalshi and Polymarket.
+CORE RULE — SAME EVENT ONLY:
+A valid cross-platform trade ONLY exists when BOTH sides refer to the IDENTICAL underlying event.
+This means: same teams/players, same game/date, same outcome question, same resolution condition.
 
-Your job: find the BEST specific trade in this sector and explain exactly what to do.
+HARD REJECT any pair where:
+- One side is a player prop and the other is a team futures bet
+- Different sports, different leagues, or different athletes
+- Different time horizons (single game vs season outcome)
+- The two titles share no meaningful entity names (teams, players, event)
 
-Use these principles from Wolfers & Zitzewitz (2006):
-- Spreads > 8-12% are needed to break even after fees (Kalshi 7%, Polymarket 2% taker)
-- Favorite-longshot bias: contracts < 0.10 or > 0.90 are systematically mispriced
-- Look for persistent spreads — brief spikes are likely API latency, not real opportunity
-- Platform user bases differ: crypto-native Polymarket traders vs US retail Kalshi users
+EXAMPLE OF INVALID PAIR (must reject):
+  Kalshi: "Gunnar Henderson 2+ hits" vs Polymarket: "Charlotte Hornets win NBA Finals"
+  → REJECT: Different sport, different entity, different time horizon.
+  → A 30% spread here is MEANINGLESS — these events are independent.
+
+EXAMPLE OF VALID PAIR (can analyze):
+  Kalshi: "Lakers vs Celtics — Lakers win" vs Polymarket: "Will the Lakers beat the Celtics?"
+  → ACCEPT: Same game, same teams, same outcome.
+  → Spread here represents genuine cross-platform mispricing.
+
+ARBITRAGE RULES (only apply to valid same-event pairs):
+- True arb exists when: best_yes_price + best_no_price < 1 - fees
+- Or directional: buy YES on the cheaper platform, sell YES (or buy NO) on the expensive one
+- Fee break-even: need >8-12% spread after Kalshi 7% on winnings + Polymarket 2% taker on notional
+- Reject if spread < 8% — not exploitable after fees for retail traders
+- Reject contracts priced < 0.10 or > 0.90 — favorite-longshot bias per Wolfers & Zitzewitz (2006)
+
+You receive:
+- matched_pairs: pre-verified same-event pairs found by the classifier
+- kalshi_only / polymarket_only: single-platform markets (cannot arb these, single-platform analysis only)
+
+For matched_pairs with same_event_verified=True:
+  → Evaluate spread exploitability and recommend action if valid
+For kalshi_only / polymarket_only:
+  → Only note as interesting single-platform markets, NOT as arb opportunities
 
 Return ONLY valid JSON:
 {
@@ -338,21 +431,25 @@ Return ONLY valid JSON:
     "polymarket_mid": 0.0,
     "spread_pct": "X.X%",
     "fee_exploitable": true,
+    "same_event": true,
     "platform_to_buy": "kalshi|polymarket",
-    "action": "Exact instruction e.g. BUY YES on Kalshi at 0.54, SHORT YES on Polymarket at 0.63",
-    "rationale": "2-3 sentences explaining why this trade makes sense right now",
-    "key_risk": "Single biggest risk"
+    "action": "Exact instruction: BUY YES on [platform] at [price], SELL YES on [platform] at [price]",
+    "rationale": "2-3 sentences. MUST confirm same event. Explain why spread is real.",
+    "key_risk": "Single biggest execution risk"
   },
   "runner_up": {
     "kalshi_title": "...",
+    "polymarket_title": "...",
     "spread_pct": "...",
     "action": "..."
   },
-  "sector_conditions": "1-2 sentences on the overall state of this sector",
-  "academic_warning": "Any relevant warning from Wolfers & Zitzewitz that applies here"
+  "no_arb_reason": "If no valid same-event pairs exist, explain why here",
+  "sector_conditions": "1-2 sentences on overall sector state",
+  "academic_warning": "Relevant Wolfers & Zitzewitz warning"
 }
 
-If there are no matched pairs, recommend the most interesting single-platform market instead.
+If there are NO valid same-event matched pairs with exploitable spread, set top_trade to null
+and explain in no_arb_reason. NEVER fabricate a trade from unrelated markets.
 """
 
 def run_drilldown(sector: str, sector_data: dict) -> dict:

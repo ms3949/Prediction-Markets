@@ -2,6 +2,7 @@
 .env
 .venv/
 __pycache__/
+scratch/
 knowledge_base.db
 knowledge_base (1).db
 *.pyc
